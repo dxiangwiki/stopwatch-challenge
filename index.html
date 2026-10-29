@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>读秒挑战</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui, sans-serif}
+body{
+  background:#202038;
+  color:#fff;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding-top:40px;
+}
+.title{
+  font-size:44px;
+  cursor: default;
+  user-select:none;
+  margin-bottom:30px;
+}
+.time-display{
+  font-size:120px;
+  color:#4cc9f0;
+  font-variant-numeric:tabular-nums;
+  margin:20px 0 40px;
+}
+.btn-wrap{
+  display:flex;
+  gap:18px;
+}
+button{
+  font-size:26px;
+  padding:18px 48px;
+  border:none;
+  border-radius:16px;
+  cursor:pointer;
+}
+#startBtn{
+  background:#4361ee;
+  color:#fff;
+}
+#resetBtn{
+  background:#f72585;
+  color:#fff;
+}
+
+.modal{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.65);
+  align-items:center;
+  justify-content:center;
+}
+.modal-content{
+  background:#2c2c4e;
+  padding:28px;
+  border-radius:20px;
+  width:min(90%,460px);
+}
+.modal h3{margin-bottom:16px}
+input{
+  width:100%;
+  padding:12px;
+  margin:8px 0;
+  border-radius:8px;
+  border:0;
+  font-size:18px;
+}
+.cfg-item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  background:#3b3b70;
+  padding:10px;
+  border-radius:8px;
+  margin:6px 0;
+}
+#closeModal{
+  margin-top:14px;
+  width:100%;
+  background:#555;
+  color:white;
+}
+</style>
+</head>
+<body>
+<h1 class="title" id="title">读秒挑战</h1>
+<div class="time-display" id="timeBox">00:00.000</div>
+<div class="btn-wrap">
+  <button id="startBtn">开始</button>
+  <button id="resetBtn">归零</button>
+</div>
+
+<div class="modal" id="cfgModal">
+  <div class="modal-content">
+    <h3>⚙️ 吸附配置</h3>
+    <input type="number" id="inpTarget" placeholder="目标时间（秒）" step="0.001">
+    <input type="number" id="inpRange" placeholder="吸附范围 ±秒" value="0.300" step="0.001">
+    <button id="addItemBtn">添加吸附点</button>
+    <div id="cfgList"></div>
+    <button id="closeModal">关闭</button>
+  </div>
+</div>
+
+<script>
+const titleEl = document.getElementById('title');
+const timeBox = document.getElementById('timeBox');
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+const cfgModal = document.getElementById('cfgModal');
+const inpTarget = document.getElementById('inpTarget');
+const inpRange = document.getElementById('inpRange');
+const addItemBtn = document.getElementById('addItemBtn');
+const cfgList = document.getElementById('cfgList');
+const closeModal = document.getElementById('closeModal');
+
+let clickCount = 0;
+let debounceTimer = null;
+const MAX_GAP = 800;
+
+titleEl.onclick = ()=>{
+  clickCount += 1;
+  clearTimeout(debounceTimer);
+
+  if(clickCount >= 3){
+    cfgModal.style.display = 'flex';
+    clickCount = 0;
+    return;
+  }
+
+  debounceTimer = setTimeout(()=>{
+    clickCount = 0;
+  }, MAX_GAP);
+}
+closeModal.onclick = ()=>{
+  cfgModal.style.display = 'none';
+}
+
+let startTime = 0;
+let elapsed = 0;
+let running = false;
+let rafId = null;
+let snapList = JSON.parse(localStorage.getItem('snapConfig')) || [];
+
+function formatTime(s){
+  const min = Math.floor(s / 60);
+  const sec = s - min*60;
+  return String(min).padStart(2,'0') + ':' + sec.toFixed(3).padStart(6,'0');
+}
+function renderTime(){
+  timeBox.innerText = formatTime(elapsed);
+}
+function tick(){
+  if(!running) return;
+  elapsed = (performance.now() - startTime)/1000;
+  renderTime();
+  rafId = requestAnimationFrame(tick);
+}
+
+startBtn.onclick = ()=>{
+  if(!running){
+    startTime = performance.now() - elapsed*1000;
+    running = true;
+    rafId = requestAnimationFrame(tick);
+    startBtn.innerText = '暂停';
+  }else{
+    cancelAnimationFrame(rafId);
+    running = false;
+    startBtn.innerText = '开始';
+    let bestVal = null;
+    let minDiff = Infinity;
+    for(let item of snapList){
+      const diff = Math.abs(elapsed - item.t);
+      if(diff <= item.r && diff < minDiff){
+        minDiff = diff;
+        bestVal = item.t;
+      }
+    }
+    if(bestVal !== null){
+      elapsed = bestVal;
+      renderTime();
+    }
+  }
+}
+resetBtn.onclick = ()=>{
+  cancelAnimationFrame(rafId);
+  running = false;
+  elapsed = 0;
+  startBtn.innerText = '开始';
+  renderTime();
+}
+
+function saveConfig(){
+  localStorage.setItem('snapConfig', JSON.stringify(snapList));
+}
+function renderList(){
+  cfgList.innerHTML = '';
+  snapList.forEach((it,idx)=>{
+    const div = document.createElement('div');
+    div.className = 'cfg-item';
+    div.innerText = `目标:${it.t.toFixed(3)}s  ±${it.r.toFixed(3)}s`;
+    const delBtn = document.createElement('button');
+    delBtn.innerText = '删除';
+    delBtn.onclick = ()=>{
+      snapList.splice(idx,1);
+      saveConfig();
+      renderList();
+    }
+    div.appendChild(delBtn);
+    cfgList.appendChild(div);
+  })
+}
+addItemBtn.onclick = ()=>{
+  const t = Number(inpTarget.value);
+  const r = Number(inpRange.value);
+  if(isNaN(t) || t <= 0) return;
+  snapList.push({t,r});
+  saveConfig();
+  renderList();
+  inpTarget.value = '';
+}
+renderList();
+renderTime();
+</script>
+</body>
+</html>
